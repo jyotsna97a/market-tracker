@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, render_template, request
 from curl_cffi import requests as curl_requests
 import yfinance as yf
-
+import os
 app = Flask(__name__)
 
 INDICES = {
@@ -63,19 +63,27 @@ def api_history():
 
     try:
         session = curl_requests.Session(impersonate="chrome")
-        hist = yf.Ticker(ticker, session=session).history(
-            period=config["period"],
-            interval=config["interval"],
-        )
+        t = yf.Ticker(ticker, session=session)
+        hist = t.history(period=config["period"], interval=config["interval"])
+
+        # Fallback for 1D: if today returned nothing (market closed),
+        # use the last 2 days at 5-min intervals and keep only the most
+        # recent trading session.
+        if hist.empty and period_key == "1d":
+            hist = t.history(period="5d", interval="5m")
+            if not hist.empty:
+                last_day = hist.index[-1].date()
+                hist = hist[hist.index.date == last_day]
+
         if hist.empty:
             return jsonify({"dates": [], "prices": []})
+
         dates  = [d.isoformat() for d in hist.index]
         prices = [round(float(p), 2) for p in hist["Close"]]
         return jsonify({"dates": dates, "prices": prices})
     except Exception as exc:
         app.logger.warning("api_history failed for %s/%s: %s", ticker, period_key, exc)
         return jsonify({"dates": [], "prices": [], "error": str(exc)})
-
 import os
 
 if __name__ == "__main__":
