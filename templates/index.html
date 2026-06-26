@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finance Tracker — Indian Markets</title>
+
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --green:     #3fb950;
+      --red:       #f85149;
+      --accent:    #58a6ff;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+      color: var(--accent);
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-bottom: 1.75rem;
+    }
+
+    /* Cards */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .card:hover { border-color: var(--accent); }
+    .card.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+
+    .card-label {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+    .card-price {
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 0.3rem;
+    }
+    .card-change { font-size: 0.85rem; font-weight: 500; }
+
+    .up   { color: var(--green); }
+    .down { color: var(--red);   }
+    .flat { color: var(--muted); }
+
+    /* Chart section */
+    .chart-section {
+      margin-top: 2rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      display: none;
+    }
+    .chart-section.active { display: block; }
+
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .chart-title { font-size: 1.2rem; font-weight: 600; }
+
+    .timeframe-buttons {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .tf-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 0.4rem 0.85rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+    .tf-btn:hover { color: var(--text); border-color: var(--accent); }
+    .tf-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    #chart { width: 100%; height: 420px; }
+
+    .chart-msg {
+      text-align: center;
+      color: var(--muted);
+      padding: 4rem 0;
+      font-size: 0.9rem;
+    }
+
+    #status {
+      margin-top: 1.5rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Finance Tracker</h1>
+  <p class="subtitle">Indian &amp; Global Markets · Live Data</p>
+
+  <div class="cards-grid" id="cards-grid"></div>
+
+  <section class="chart-section" id="chart-section">
+    <div class="chart-header">
+      <div class="chart-title" id="chart-title">—</div>
+      <div class="timeframe-buttons">
+        <button class="tf-btn" data-period="1d">1D</button>
+        <button class="tf-btn" data-period="1w">1W</button>
+        <button class="tf-btn active" data-period="1mo">1M</button>
+        <button class="tf-btn" data-period="6mo">6M</button>
+        <button class="tf-btn" data-period="1y">1Y</button>
+        <button class="tf-btn" data-period="5y">5Y</button>
+      </div>
+    </div>
+    <div id="chart"></div>
+  </section>
+
+  <p id="status">Loading…</p>
+
+  <script>
+    let selectedTicker = null;
+    let selectedPeriod = "1mo";
+
+    function fmt(value, decimals = 2) {
+      if (value === null || value === undefined) return "—";
+      return Number(value).toLocaleString("en-IN", {
+        minimumFractionDigits: decimals, maximumFractionDigits: decimals,
+      });
+    }
+    function dirClass(c) { return c == null ? "flat" : c >= 0 ? "up" : "down"; }
+    function arrow(c)    { return c == null ? ""     : c >= 0 ? "▲ " : "▼ "; }
+
+    function renderCards(data) {
+      const grid = document.getElementById("cards-grid");
+      grid.innerHTML = "";
+      data.forEach(d => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.dataset.ticker = d.ticker;
+        if (d.ticker === selectedTicker) card.classList.add("selected");
+        card.innerHTML = `
+          <div class="card-label">${d.label}</div>
+          <div class="card-price">${fmt(d.price, 2)}</div>
+          <div class="card-change ${dirClass(d.change)}">
+            ${arrow(d.change)}${fmt(Math.abs(d.change), 2)}
+            &nbsp;(${arrow(d.change)}${fmt(Math.abs(d.change_pct), 2)}%)
+          </div>`;
+        card.addEventListener("click", () => selectCard(d.ticker, d.label));
+        grid.appendChild(card);
+      });
+    }
+
+    function selectCard(ticker, label) {
+      selectedTicker = ticker;
+      document.querySelectorAll(".card").forEach(c => {
+        c.classList.toggle("selected", c.dataset.ticker === ticker);
+      });
+      document.getElementById("chart-title").textContent = label;
+      document.getElementById("chart-section").classList.add("active");
+      loadChart();
+    }
+
+    document.querySelectorAll(".tf-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        selectedPeriod = btn.dataset.period;
+        document.querySelectorAll(".tf-btn").forEach(b => {
+          b.classList.toggle("active", b === btn);
+        });
+        if (selectedTicker) loadChart();
+      });
+    });
+
+    async function loadChart() {
+      if (!selectedTicker) return;
+      const chartDiv = document.getElementById("chart");
+      chartDiv.innerHTML = '<div class="chart-msg">Loading chart…</div>';
+
+      try {
+        const url = `/api/history?ticker=${encodeURIComponent(selectedTicker)}&period=${selectedPeriod}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        if (!data.dates || data.dates.length === 0) {
+          chartDiv.innerHTML = '<div class="chart-msg">No data available for this timeframe.</div>';
+          return;
+        }
+
+        const first = data.prices[0];
+        const last  = data.prices[data.prices.length - 1];
+        const color = last >= first ? "#3fb950" : "#f85149";
+
+        const trace = {
+          x: data.dates,
+          y: data.prices,
+          type: "scatter",
+          mode: "lines",
+          line: { color: color, width: 2 },
+          hovertemplate: "%{x|%b %d, %Y %H:%M}<br><b>%{y:,.2f}</b><extra></extra>",
+        };
+
+        const layout = {
+          paper_bgcolor: "transparent",
+          plot_bgcolor:  "transparent",
+          font:          { color: "#e6edf3", family: "Segoe UI" },
+          margin:        { t: 20, r: 20, b: 40, l: 70 },
+          xaxis: { gridcolor: "#30363d", linecolor: "#30363d", color: "#8b949e" },
+          yaxis: { gridcolor: "#30363d", linecolor: "#30363d", color: "#8b949e", tickformat: ",.0f" },
+          hovermode: "x unified",
+          showlegend: false,
+        };
+
+        Plotly.newPlot(chartDiv, [trace], layout, { displayModeBar: false, responsive: true });
+      } catch (err) {
+        console.error("loadChart error:", err);
+        chartDiv.innerHTML = '<div class="chart-msg">Failed to load chart.</div>';
+      }
+    }
+
+    async function loadIndices() {
+      const status = document.getElementById("status");
+      try {
+        const resp = await fetch("/api/indices");
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        renderCards(await resp.json());
+        status.textContent = "Last updated: " + new Date().toLocaleTimeString("en-IN");
+      } catch (err) {
+        console.error("loadIndices error:", err);
+        status.textContent = "Failed to load data — retrying in 5 min…";
+      }
+    }
+
+    loadIndices();
+    setInterval(loadIndices, 5 * 60 * 1000);
+  </script>
+</body>
+</html>
